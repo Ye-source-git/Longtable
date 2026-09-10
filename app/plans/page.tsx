@@ -60,6 +60,7 @@ export default function PlansPage() {
   const [prayerDay, setPrayerDay] = useState<number | null>(null);
   const [reflectShareTableId, setReflectShareTableId] = useState<number | "">("");
   const [tables, setTables] = useState<TableOption[]>([]);
+  const [tablePlans, setTablePlans] = useState<Plan[]>([]);
   const [bookPickerValue, setBookPickerValue] = useState(OT[0][0]);
   const [visibleCount, setVisibleCount] = useState(30);
 
@@ -70,6 +71,7 @@ export default function PlansPage() {
       const { data: planRows } = await supabase
         .from("plans")
         .select("id, title, blurb, category, total_days, season_key")
+        .is("owner_table_id", null)
         .order("sort_order", { ascending: true });
       setPlans(planRows ?? []);
 
@@ -78,9 +80,14 @@ export default function PlansPage() {
         setLoaded(true);
         return;
       }
-      const [progressRes, tablesRes] = await Promise.all([
+      const [progressRes, tablesRes, tablePlansRes] = await Promise.all([
         supabase.from("plan_progress").select("plan_id, day_index").eq("user_id", user.id),
         supabase.from("table_members").select("role, tables(id, name)").eq("user_id", user.id),
+        // A plan authored by one of my tables — kept out of the public catalog,
+        // surfaced here so members can read it, mark days, and reflect as usual.
+        supabase
+          .from("table_plans")
+          .select("plans(id, title, blurb, category, total_days, season_key, owner_table_id, archived_at)"),
       ]);
       const next: Record<string, Set<number>> = {};
       for (const row of progressRes.data ?? []) {
@@ -95,6 +102,14 @@ export default function PlansPage() {
             return t ? { id: t.id, name: t.name } : null;
           })
           .filter((t): t is TableOption => t !== null)
+      );
+      const seen = new Set<string>();
+      setTablePlans(
+        (tablePlansRes.data ?? [])
+          .map((r) => (Array.isArray(r.plans) ? r.plans[0] : r.plans))
+          .filter((p): p is NonNullable<typeof p> => !!p && !!p.owner_table_id && !p.archived_at)
+          .filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)))
+          .map((p) => ({ id: p.id, title: p.title, blurb: p.blurb, category: p.category, total_days: p.total_days, season_key: p.season_key }))
       );
       setLoaded(true);
     })();
@@ -168,7 +183,7 @@ export default function PlansPage() {
   }
 
   if (openPlanId) {
-    const plan = plans.find((p) => p.id === openPlanId)!;
+    const plan = (plans.find((p) => p.id === openPlanId) ?? tablePlans.find((p) => p.id === openPlanId))!;
     const done = progress[plan.id] || new Set<number>();
     const pct = Math.round((done.size / plan.total_days) * 100);
     return (
@@ -389,6 +404,44 @@ export default function PlansPage() {
     byCategory.get(plan.category)!.push(plan);
   }
 
+  const planCard = (plan: Plan) => {
+    const done = (progress[plan.id] || new Set()).size;
+    const pct = Math.round((done / plan.total_days) * 100);
+    return (
+      <button
+        key={plan.id}
+        onClick={() => openPlan(plan.id)}
+        className="w-full text-left rounded-2xl px-5 py-4 focus:outline-none"
+        style={{ background: C.card, border: `1px solid ${C.border}` }}
+      >
+        <div className="flex items-baseline justify-between mb-1 gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p style={{ fontFamily: "'Fraunces', serif", fontSize: 19, color: C.ink }}>{plan.title}</p>
+            {plan.season_key && isInSeason(plan.season_key) && (
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ fontFamily: "'Albert Sans', sans-serif", color: C.white, background: C.gold, letterSpacing: "0.04em", textTransform: "uppercase" }}
+              >
+                Happening now
+              </span>
+            )}
+          </div>
+          <p className="text-xs flex-shrink-0 ml-3" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.gold }}>
+            {plan.total_days} days{done > 0 ? ` · ${pct}%` : ""}
+          </p>
+        </div>
+        <p className="text-sm" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.inkSoft }}>
+          {plan.blurb}
+        </p>
+        {done > 0 && (
+          <div className="rounded-full h-1.5 mt-3" style={{ background: C.goldSoft }}>
+            <div className="h-1.5 rounded-full" style={{ background: C.gold, width: `${pct}%` }} />
+          </div>
+        )}
+      </button>
+    );
+  };
+
   return (
     <div>
       <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 26, color: C.ink }} className="mb-2">
@@ -398,6 +451,18 @@ export default function PlansPage() {
         Pick a plan, read one short passage a day, and your progress is saved as you go.
       </p>
 
+      {tablePlans.length > 0 && (
+        <div className="mb-8">
+          <h3
+            className="text-xs font-semibold mb-3"
+            style={{ fontFamily: "'Albert Sans', sans-serif", color: C.gold, letterSpacing: "0.08em", textTransform: "uppercase" }}
+          >
+            Your Tables’ Plans
+          </h3>
+          <div className="space-y-3">{tablePlans.map(planCard)}</div>
+        </div>
+      )}
+
       {CATEGORY_ORDER.filter((c) => byCategory.has(c)).map((category) => (
         <div key={category} className="mb-8">
           <h3
@@ -406,45 +471,7 @@ export default function PlansPage() {
           >
             {CATEGORY_LABELS[category] ?? category}
           </h3>
-          <div className="space-y-3">
-            {byCategory.get(category)!.map((plan) => {
-              const done = (progress[plan.id] || new Set()).size;
-              const pct = Math.round((done / plan.total_days) * 100);
-              return (
-                <button
-                  key={plan.id}
-                  onClick={() => openPlan(plan.id)}
-                  className="w-full text-left rounded-2xl px-5 py-4 focus:outline-none"
-                  style={{ background: C.card, border: `1px solid ${C.border}` }}
-                >
-                  <div className="flex items-baseline justify-between mb-1 gap-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p style={{ fontFamily: "'Fraunces', serif", fontSize: 19, color: C.ink }}>{plan.title}</p>
-                      {plan.season_key && isInSeason(plan.season_key) && (
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{ fontFamily: "'Albert Sans', sans-serif", color: C.white, background: C.gold, letterSpacing: "0.04em", textTransform: "uppercase" }}
-                        >
-                          Happening now
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs flex-shrink-0 ml-3" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.gold }}>
-                      {plan.total_days} days{done > 0 ? ` · ${pct}%` : ""}
-                    </p>
-                  </div>
-                  <p className="text-sm" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.inkSoft }}>
-                    {plan.blurb}
-                  </p>
-                  {done > 0 && (
-                    <div className="rounded-full h-1.5 mt-3" style={{ background: C.goldSoft }}>
-                      <div className="h-1.5 rounded-full" style={{ background: C.gold, width: `${pct}%` }} />
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <div className="space-y-3">{byCategory.get(category)!.map(planCard)}</div>
         </div>
       ))}
 

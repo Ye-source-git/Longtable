@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { C } from "@/lib/constants";
-import { QuietButton } from "@/components/ui";
+import { C, NT, OT } from "@/lib/constants";
+import { GoldButton, QuietButton, selectStyle } from "@/components/ui";
 import { RequireSavedAccount } from "@/components/auth/RequireSavedAccount";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { createClient } from "@/lib/supabase/client";
@@ -48,6 +48,12 @@ function TableDetail({ id }: { id: string }) {
   const [streak, setStreak] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [availablePlans, setAvailablePlans] = useState<PlanOption[] | null>(null);
+  const [customBook, setCustomBook] = useState(OT[0][0]);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [creatingPlan, setCreatingPlan] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [archivedPlans, setArchivedPlans] = useState<ActivePlan[]>([]);
 
   const [prayers, setPrayers] = useState<Prayer[] | null>(null);
   const [newPrayerText, setNewPrayerText] = useState("");
@@ -220,30 +226,90 @@ function TableDetail({ id }: { id: string }) {
     loadReflections();
   }, [loadReflections]);
 
+  const loadArchived = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("plans")
+      .select("id, title, total_days")
+      .eq("owner_table_id", id)
+      .not("archived_at", "is", null)
+      .order("archived_at", { ascending: false });
+    setArchivedPlans((data ?? []).map((p) => ({ planId: p.id, title: p.title, totalDays: p.total_days })));
+  }, [id]);
+
+  useEffect(() => {
+    if (yourRole === "owner") loadArchived();
+  }, [yourRole, loadArchived]);
+
   async function openPicker() {
     setPickerOpen(true);
     if (!availablePlans) {
       const supabase = createClient();
-      const { data } = await supabase.from("plans").select("id, title").order("sort_order");
-      setAvailablePlans(data ?? []);
+      // Catalog plans only — the 66 per-book studies are reachable via
+      // "Build a plan for this table" below, and other tables' custom plans
+      // aren't ours to start.
+      const { data } = await supabase
+        .from("plans")
+        .select("id, title, category")
+        .is("owner_table_id", null)
+        .neq("category", "book-study")
+        .order("sort_order");
+      setAvailablePlans((data ?? []).map((p) => ({ id: p.id, title: p.title })));
     }
   }
 
   async function startPlan(planId: string) {
     if (!user) return;
     const supabase = createClient();
+    // One shared plan at a time — clear whatever was active before starting this.
+    await supabase.from("table_plans").delete().eq("table_id", Number(id));
     await supabase.from("table_plans").insert({ table_id: Number(id), plan_id: planId, started_by: user.id });
     setPickerOpen(false);
     await refreshPlan();
   }
 
+  async function createCustomPlan() {
+    if (creatingPlan) return;
+    setCreatingPlan(true);
+    setPlanError(null);
+    const res = await fetch(`/api/tables/${id}/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        book: customBook,
+        startChapter: customFrom.trim() ? Number(customFrom) : undefined,
+        endChapter: customTo.trim() ? Number(customTo) : undefined,
+      }),
+    });
+    setCreatingPlan(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      setPlanError(j?.error ?? "Couldn’t create the plan.");
+      return;
+    }
+    setPickerOpen(false);
+    setCustomFrom("");
+    setCustomTo("");
+    await refreshPlan();
+  }
+
+  async function restartPlan(planId: string) {
+    await fetch(`/api/tables/${id}/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restartPlanId: planId }),
+    });
+    await refreshPlan();
+    await loadArchived();
+  }
+
   async function stopPlan() {
     if (!activePlan) return;
-    const supabase = createClient();
-    await supabase.from("table_plans").delete().eq("table_id", id).eq("plan_id", activePlan.planId);
+    await fetch(`/api/tables/${id}/plan`, { method: "DELETE" });
     setActivePlan(null);
     setProgress(null);
     setStreak(0);
+    await loadArchived();
   }
 
   async function removeMember(targetUserId: string) {
@@ -362,23 +428,82 @@ function TableDetail({ id }: { id: string }) {
           </>
         ) : yourRole === "owner" ? (
           pickerOpen ? (
-            <div className="space-y-1">
-              {availablePlans === null ? (
-                <p className="text-sm italic" style={{ color: C.inkSoft, fontFamily: "'Lora', serif" }}>
-                  Loading…
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold mb-2" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.ink }}>
+                  Build a plan for this table
                 </p>
-              ) : (
-                availablePlans.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => startPlan(p.id)}
-                    className="block w-full text-left text-sm px-2 py-1.5 rounded-lg focus:outline-none"
-                    style={{ fontFamily: "'Lora', serif", color: C.ink }}
-                  >
-                    {p.title}
-                  </button>
-                ))
-              )}
+                <select
+                  value={customBook}
+                  onChange={(e) => setCustomBook(e.target.value)}
+                  className="w-full rounded-xl px-3 py-2 text-sm mb-2 focus:outline-none"
+                  style={selectStyle}
+                >
+                  <optgroup label="Hebrew Bible / Old Testament">
+                    {OT.map(([b]) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="New Testament">
+                    {NT.map(([b]) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </optgroup>
+                </select>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.inkSoft }}>Chapters</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={customFrom}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    placeholder="all"
+                    className="w-16 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                    style={{ fontFamily: "'Albert Sans', sans-serif", background: C.paper, border: `1px solid ${C.border}`, color: C.ink }}
+                  />
+                  <span className="text-xs" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.inkSoft }}>to</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={customTo}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    placeholder="all"
+                    className="w-16 rounded-lg px-2 py-1.5 text-sm focus:outline-none"
+                    style={{ fontFamily: "'Albert Sans', sans-serif", background: C.paper, border: `1px solid ${C.border}`, color: C.ink }}
+                  />
+                </div>
+                <GoldButton onClick={createCustomPlan} disabled={creatingPlan}>
+                  {creatingPlan ? "Creating…" : "Create & start"}
+                </GoldButton>
+                {planError && (
+                  <p className="mt-2 text-sm" style={{ color: "#8A3B2E", fontFamily: "'Albert Sans', sans-serif" }}>{planError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px" style={{ background: C.border }} />
+                <span className="text-xs" style={{ color: C.inkSoft, fontFamily: "'Albert Sans', sans-serif" }}>or choose one of Longtable’s plans</span>
+                <div className="flex-1 h-px" style={{ background: C.border }} />
+              </div>
+
+              <div className="space-y-1">
+                {availablePlans === null ? (
+                  <p className="text-sm italic" style={{ color: C.inkSoft, fontFamily: "'Lora', serif" }}>
+                    Loading…
+                  </p>
+                ) : (
+                  availablePlans.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => startPlan(p.id)}
+                      className="block w-full text-left text-sm px-2 py-1.5 rounded-lg focus:outline-none"
+                      style={{ fontFamily: "'Lora', serif", color: C.ink }}
+                    >
+                      {p.title}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           ) : (
             <QuietButton onClick={openPicker}>Start reading together</QuietButton>
@@ -387,6 +512,30 @@ function TableDetail({ id }: { id: string }) {
           <p className="text-sm" style={{ fontFamily: "'Lora', serif", color: C.inkSoft }}>
             Nobody’s started a shared plan here yet.
           </p>
+        )}
+
+        {yourRole === "owner" && archivedPlans.length > 0 && (
+          <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
+            <p className="text-xs font-semibold mb-2" style={{ fontFamily: "'Albert Sans', sans-serif", color: C.inkSoft }}>
+              Past plans
+            </p>
+            <div className="space-y-1">
+              {archivedPlans.map((p) => (
+                <div key={p.planId} className="flex items-center justify-between gap-3">
+                  <span className="text-sm" style={{ fontFamily: "'Lora', serif", color: C.inkSoft }}>
+                    {p.title}
+                  </span>
+                  <button
+                    onClick={() => restartPlan(p.planId)}
+                    className="text-xs font-semibold focus:outline-none flex-shrink-0"
+                    style={{ fontFamily: "'Albert Sans', sans-serif", color: C.gold }}
+                  >
+                    Restart
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
