@@ -75,9 +75,13 @@ export const DAILY_VERSES = [
 ];
 
 export function todaysVerse() {
+  // Day-of-year from UTC components only, so this resolves to the same verse
+  // whether it runs on the server (UTC) or in a browser in any timezone —
+  // otherwise the server- and client-rendered verse can disagree and trip a
+  // hydration mismatch. The "day" rolls over at UTC midnight for everyone.
   const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 0);
-  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  const startOfYearUTC = Date.UTC(now.getUTCFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now.getTime() - startOfYearUTC) / 86400000);
   return DAILY_VERSES[dayOfYear % DAILY_VERSES.length];
 }
 

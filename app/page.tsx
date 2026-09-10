@@ -25,6 +25,19 @@ export default function TodayPage() {
   const [resume, setResume] = useState<Resume[]>([]);
   const [resumeLoading, setResumeLoading] = useState(true);
   const [seasonalPlan, setSeasonalPlan] = useState<SeasonalPlan | null>(null);
+  // Filled in after mount — the formatted date depends on the visitor's own
+  // locale and timezone, which the server can't know, so rendering it during
+  // SSR would guarantee a hydration mismatch.
+  const [dateStr, setDateStr] = useState("");
+
+  useEffect(() => {
+    // Intentional: this is the standard "compute after mount" pattern for a
+    // value that must not be part of the SSR output.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDateStr(
+      new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+    );
+  }, []);
 
   // Seasonal plans (Advent, Holy Week) are always available under Plans, but
   // are only promoted here — front and center — during their actual real-
@@ -97,19 +110,13 @@ export default function TodayPage() {
     router.push(`/companion?seed=${encodeURIComponent(prompt)}`);
   }
 
-  const dateStr = new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
-
   return (
     <div>
       <p
         className="text-xs mb-6"
         style={{ color: C.gold, fontFamily: "'Albert Sans', sans-serif", letterSpacing: "0.08em", textTransform: "uppercase" }}
       >
-        {dateStr}
+        {dateStr || " "}
       </p>
 
       <div className="rounded-3xl px-6 py-8 sm:px-10 sm:py-10 mb-8" style={{ background: BRAND.deep }}>
