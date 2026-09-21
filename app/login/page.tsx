@@ -1,6 +1,12 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { LoginClient } from "@/components/auth/LoginClient";
 import { C } from "@/lib/constants";
+
+export const metadata: Metadata = {
+  title: "Sign in — Longtable",
+  robots: { index: false, follow: true },
+};
 
 export default function LoginPage() {
   return (

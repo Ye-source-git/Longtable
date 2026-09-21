@@ -6,6 +6,7 @@ import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.longtable.study"),
   title: "Longtable — Bible study for everyone",
   description: "Scripture, open to everyone — whatever your tradition, wherever you’re starting.",
   appleWebApp: {

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { C } from "@/lib/constants";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LogoMark } from "@/components/LogoMark";
 
 const LINKS = [
   { href: "/", label: "Today" },
@@ -25,8 +26,9 @@ export function Nav() {
     <>
       <header className="px-5 pt-8 pb-4 max-w-3xl mx-auto flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-baseline gap-3">
-            <Link href="/">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="flex items-center gap-2.5">
+              <LogoMark />
               <h1 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 30, color: C.ink }}>
                 Longtable
               </h1>
