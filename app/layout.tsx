@@ -55,6 +55,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 traditional interpretations; it does not decide questions of faith for you.
               </p>
               <p className="text-[11px] mt-3" style={{ fontFamily: "'Albert Sans', sans-serif" }}>
+                <Link href="/about" style={{ color: C.inkSoft }}>
+                  About
+                </Link>
+                <span style={{ color: C.border }}> · </span>
                 <Link href="/privacy" style={{ color: C.inkSoft }}>
                   Privacy Policy
                 </Link>

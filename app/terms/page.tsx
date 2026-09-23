@@ -1,19 +1,7 @@
 import { C } from "@/lib/constants";
+import { Section } from "@/components/Section";
 
 export const metadata = { title: "Terms of Service — Longtable" };
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-8">
-      <h2 style={{ fontFamily: "'Fraunces', serif", fontSize: 20, color: C.ink }} className="mb-3">
-        {title}
-      </h2>
-      <div className="space-y-3 text-[15px] leading-relaxed" style={{ fontFamily: "'Lora', serif", color: C.ink }}>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 export default function TermsPage() {
   return (
